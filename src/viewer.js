@@ -17,10 +17,10 @@ import {
 	Scene,
 	SkeletonHelper,
 	Vector3,
-	WebGLRenderer,
 	LinearToneMapping,
 	ACESFilmicToneMapping,
-} from 'three';
+	WebGPURenderer
+} from 'three/webgpu';
 import Stats from 'three/addons/libs/stats.module.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
@@ -28,11 +28,13 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { EXRLoader } from 'three/addons/loaders/EXRLoader.js';
+import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 import { GUI } from 'dat.gui';
 
 import { environments } from './environments.js';
+import { GLTFMOZLightMapExtension, GLTFMozTextureRGBE } from './gltfExtensions';
 
 const DEFAULT_CAMERA = '[default]';
 
@@ -106,7 +108,7 @@ export class Viewer {
 		this.activeCamera = this.defaultCamera;
 		this.scene.add(this.defaultCamera);
 
-		this.renderer = window.renderer = new WebGLRenderer({ antialias: true });
+		this.renderer = window.renderer = new WebGPURenderer({ antialias: true });
 		this.renderer.setClearColor(0xcccccc);
 		this.renderer.setPixelRatio(window.devicePixelRatio);
 		this.renderer.setSize(el.clientWidth, el.clientHeight);
@@ -205,6 +207,21 @@ export class Viewer {
 				.setDRACOLoader(DRACO_LOADER)
 				.setKTX2Loader(KTX2_LOADER.detectSupport(this.renderer))
 				.setMeshoptDecoder(MeshoptDecoder);
+
+			loader
+				.register(
+					(parser) =>
+						new GLTFMozTextureRGBE(parser, (mimeType) => {
+							if (mimeType === 'image/vnd.radiance') {
+								return new RGBELoader().setDataType(THREE.HalfFloatType)
+							}
+							if (mimeType === 'image/x-exr') {
+								return new EXRLoader().setDataType(THREE.HalfFloatType)
+							}
+
+						})
+				)
+				.register((parser) => new GLTFMOZLightMapExtension(parser));
 
 			const blobURLs = [];
 
@@ -505,7 +522,7 @@ export class Viewer {
 		this.axesCamera = new PerspectiveCamera(50, clientWidth / clientHeight, 0.1, 10);
 		this.axesScene.add(this.axesCamera);
 
-		this.axesRenderer = new WebGLRenderer({ alpha: true });
+		this.axesRenderer = new WebGPURenderer({ alpha: true });
 		this.axesRenderer.setPixelRatio(window.devicePixelRatio);
 		this.axesRenderer.setSize(this.axesDiv.clientWidth, this.axesDiv.clientHeight);
 
