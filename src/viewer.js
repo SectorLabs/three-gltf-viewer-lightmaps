@@ -21,6 +21,7 @@ import {
 	ACESFilmicToneMapping,
 	WebGPURenderer
 } from 'three/webgpu';
+import { lights } from 'three/tsl';
 import Stats from 'three/addons/libs/stats.module.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
@@ -29,7 +30,6 @@ import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { EXRLoader } from 'three/addons/loaders/EXRLoader.js';
 import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 import { GUI } from 'dat.gui';
 
@@ -63,12 +63,13 @@ export class Viewer {
 		this.mixer = null;
 		this.clips = [];
 		this.gui = null;
+		this.sun = null;
 
 		this.state = {
 			environment:
 				options.preset === Preset.ASSET_GENERATOR
 					? environments.find((e) => e.id === 'footprint-court').name
-					: environments[1].name,
+					: environments[0].name,
 			background: false,
 			playbackSpeed: 1.0,
 			actionStates: {},
@@ -81,10 +82,10 @@ export class Viewer {
 			// Lights
 			punctualLights: true,
 			exposure: 0.0,
-			toneMapping: LinearToneMapping,
-			ambientIntensity: 0.3,
+			toneMapping: ACESFilmicToneMapping,
+			ambientIntensity: 0.0,
 			ambientColor: '#FFFFFF',
-			directIntensity: 0.8 * Math.PI, // TODO(#116)
+			directIntensity: 0 * 0.8 * Math.PI, // TODO(#116)
 			directColor: '#FFFFFF',
 			bgColor: '#191919',
 
@@ -108,15 +109,13 @@ export class Viewer {
 		this.activeCamera = this.defaultCamera;
 		this.scene.add(this.defaultCamera);
 
-		this.renderer = window.renderer = new WebGPURenderer({ antialias: true });
+		this.renderer = window.renderer = new WebGPURenderer({ antialias: true, alpha: true });
 		this.renderer.setClearColor(0xcccccc);
 		this.renderer.setPixelRatio(window.devicePixelRatio);
 		this.renderer.setSize(el.clientWidth, el.clientHeight);
 
 		this.pmremGenerator = new PMREMGenerator(this.renderer);
 		this.pmremGenerator.compileEquirectangularShader();
-
-		this.neutralEnvironment = this.pmremGenerator.fromScene(new RoomEnvironment()).texture;
 
 		this.controls = new OrbitControls(this.defaultCamera, this.renderer.domElement);
 		this.controls.screenSpacePanning = true;
@@ -240,6 +239,55 @@ export class Viewer {
 								' it may contain individual 3D resources.',
 						);
 					}
+
+					const directionalLights = [];
+
+					scene.traverse((child) => {
+						if (child.isDirectionalLight) {
+							directionalLights.push(child);
+						}
+					});
+
+					directionalLights.forEach(directionalLight => {
+						directionalLight.removeFromParent();
+					});
+
+					const bbox = new THREE.Box3().setFromObject(scene);
+					const bsphere = new THREE.Sphere();
+					bbox.getBoundingSphere(bsphere);
+
+					if (!directionalLights[0]) {
+						const sun = new THREE.DirectionalLight( 0xffffee, 1 );
+						sun.position.set(11, 11, 20);
+
+						this.setupSun(sun, bsphere);
+					} else {
+						this.setupSun(directionalLights[0], bsphere);
+					}
+
+					const sunLightsNode = lights( [ this.sun ] );
+                	const noLightsNode = lights( [ ] );
+
+					scene.traverse((child) => {
+						if (child.isMesh) {
+							child.castShadow = true;
+							if (!child?.material?.lightMap) {
+								child.receiveShadow = true;
+								child.material.envMap = this.envMap;
+								child.material.envMapIntensity = 0.15;
+								child.material.lightsNode = sunLightsNode;
+							} else {
+								child.material.lightsNode = noLightsNode;
+								child.material.envMapIntensity = 0;
+							}
+
+							if (child?.material?.transmission && child?.material?.transmission  > 0.7) {
+								child.castShadow = false;  // transparent materials shouldn't cast shadows
+								child.material.envMapIntensity = 1;
+								//child.material.metalness = 0.15;
+							}
+						}
+					});
 
 					this.setContent(scene, clips);
 
@@ -396,14 +444,6 @@ export class Viewer {
 	addLights() {
 		const state = this.state;
 
-		if (this.options.preset === Preset.ASSET_GENERATOR) {
-			const hemiLight = new HemisphereLight();
-			hemiLight.name = 'hemi_light';
-			this.scene.add(hemiLight);
-			this.lights.push(hemiLight);
-			return;
-		}
-
 		const light1 = new AmbientLight(state.ambientColor, state.ambientIntensity);
 		light1.name = 'ambient_light';
 		this.defaultCamera.add(light1);
@@ -421,6 +461,58 @@ export class Viewer {
 		this.lights.length = 0;
 	}
 
+
+    setupSun(directionalLight, bSphere) {
+        const sun = new THREE.DirectionalLight( 0xffffee, 1 );
+        sun.position.copy(directionalLight.position.add(bSphere.center)); //translate sun to optimize the shadow camera position
+        const buildingCenter = new THREE.Object3D();
+        buildingCenter.position.copy(bSphere.center);
+        this.scene.add(buildingCenter);
+        sun.target = buildingCenter;
+        sun.castShadow = true;
+        sun.shadow.mapSize.width = 1024;
+        sun.shadow.mapSize.height = 1024;
+
+        sun.shadow.bias = -0.003;
+        sun.shadow.radius = 5;
+        sun.shadow.blurSamples = 20;
+        sun.intensity = 1;
+
+        this.sun = sun;
+        this.scene.add(this.sun);
+        this.setupSunShadow(bSphere);
+        this.renderer.shadowMap.needsUpdate = true;
+        this.forceRender = true;
+    }
+
+    setupSunShadow(bSphere) {
+        const radius = bSphere.radius;
+        const sun = this.sun;
+        sun.shadow.camera.left = -bSphere.radius;
+        sun.shadow.camera.bottom = -bSphere.radius;
+        sun.shadow.camera.top = bSphere.radius;
+        sun.shadow.camera.right = bSphere.radius;
+        const distanceToCenter = sun.position.distanceTo(bSphere.center);
+        sun.shadow.camera.near = distanceToCenter - bSphere.radius;
+        const sunVector = sun.position.clone().sub(bSphere.center)
+        const projectedSunVector = sunVector.clone().projectOnPlane(new THREE.Vector3(0, 1, 0));
+        const alpha = sunVector.angleTo(projectedSunVector); //sun angle relative to the shadow plane
+
+        const y = radius + (bSphere.center.y / Math.cos(alpha));
+        const x = y / Math.tan(alpha);
+
+        sun.shadow.camera.far = distanceToCenter + Math.max(bSphere.radius, x);
+        if (this.options.debug) {
+            const helper = new THREE.CameraHelper(sun.shadow.camera);
+            this.scene.add(helper);
+            const boundingSphereGeometry = new THREE.SphereGeometry( bSphere.radius, 8, 8 );
+            const material = new THREE.MeshStandardMaterial( { color: 0xff0000, wireframe: true } );
+            const boundingSphere = new THREE.Mesh( boundingSphereGeometry, material );
+            boundingSphere.position.copy(bSphere.center);
+            this.scene.add( boundingSphere );
+        }
+    }
+
 	updateEnvironment() {
 		const environment = environments.filter(
 			(entry) => entry.name === this.state.environment,
@@ -434,11 +526,6 @@ export class Viewer {
 
 	getCubeMapTexture(environment) {
 		const { id, path } = environment;
-
-		// neutral (THREE.RoomEnvironment)
-		if (id === 'neutral') {
-			return Promise.resolve({ envMap: this.neutralEnvironment });
-		}
 
 		// none
 		if (id === '') {
