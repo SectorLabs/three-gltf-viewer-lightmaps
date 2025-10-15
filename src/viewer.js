@@ -35,7 +35,7 @@ import { GUI } from 'dat.gui';
 
 import { environments } from './environments.js';
 import { GLTFMOZLightMapExtension, GLTFMozTextureRGBE } from './gltfExtensions';
-import { createRNMMaterial, updateRNMMaterialIntensity, updateRNMMaterialDebugMode } from './rnmMaterial.js';
+import { createRNMMaterial, updateRNMMaterialIntensity, updateRNMMaterialDebugMode, updateRNMBasisToggles } from './rnmMaterial.js';
 
 const DEFAULT_CAMERA = '[default]';
 
@@ -95,6 +95,9 @@ export class Viewer {
 			// RNM (Radiosity Normal Mapping)
 			directionalIntensity: 0.3,
 			rnmDebug: false,
+			rnmBasis1: true,
+			rnmBasis2: true,
+			rnmBasis3: true,
 		};
 
 		this.prevTime = 0;
@@ -652,6 +655,17 @@ export class Viewer {
 		});
 	}
 
+	updateRNMBasisToggles() {
+		if (!this.content) return;
+
+		// Update basis toggles for all meshes with RNM materials
+		this.content.traverse((node) => {
+			if (node.isMesh && node.material && node.material.userData.rnmOriginalMaterial) {
+				updateRNMBasisToggles(node, this.state.rnmBasis1, this.state.rnmBasis2, this.state.rnmBasis3);
+			}
+		});
+	}
+
 	/**
 	 * Adds AxesHelper.
 	 *
@@ -733,6 +747,18 @@ export class Viewer {
 		const rnmDebugCtrl = lightFolder.add(this.state, 'rnmDebug');
 		rnmDebugCtrl.name('RNM Debug');
 		rnmDebugCtrl.onChange(() => this.updateRNMDebug());
+
+		const rnmBasis1Ctrl = lightFolder.add(this.state, 'rnmBasis1');
+		rnmBasis1Ctrl.name('Enable Basis 1');
+		rnmBasis1Ctrl.onChange(() => this.updateRNMBasisToggles());
+
+		const rnmBasis2Ctrl = lightFolder.add(this.state, 'rnmBasis2');
+		rnmBasis2Ctrl.name('Enable Basis 2');
+		rnmBasis2Ctrl.onChange(() => this.updateRNMBasisToggles());
+
+		const rnmBasis3Ctrl = lightFolder.add(this.state, 'rnmBasis3');
+		rnmBasis3Ctrl.name('Enable Basis 3');
+		rnmBasis3Ctrl.onChange(() => this.updateRNMBasisToggles());
 
 		// Animation controls.
 		this.animFolder = gui.addFolder('Animation');

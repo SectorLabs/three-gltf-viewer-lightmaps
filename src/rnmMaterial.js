@@ -17,7 +17,7 @@ import {
 /**
  * Creates a NodeMaterial with RNM lighting integrated into PBR workflow
  */
-export function createRNMMaterial(originalMaterial, directionalBasis1, directionalBasis2, directionalBasis3, directionalIntensity = 0.3) {
+export function createRNMMaterial(originalMaterial, directionalBasis1, directionalBasis2, directionalBasis3, directionalIntensity = 0.3, enableBasis1 = true, enableBasis2 = true, enableBasis3 = true) {
     console.log('RNM: Creating custom NodeMaterial for RNM');
 
     // Create a new NodeMaterial
@@ -66,7 +66,10 @@ export function createRNMMaterial(originalMaterial, directionalBasis1, direction
         rnmBasis2: directionalBasis2,
         rnmBasis3: directionalBasis3,
         rnmIntensity: directionalIntensity,
-        rnmDebugMode: 0
+        rnmDebugMode: 0,
+        rnmEnableBasis1: enableBasis1,
+        rnmEnableBasis2: enableBasis2,
+        rnmEnableBasis3: enableBasis3
     };
 
     // Get lightmap UV (second UV channel)
@@ -98,10 +101,10 @@ export function createRNMMaterial(originalMaterial, directionalBasis1, direction
     const dot2 = add(add(mul(basis2Vec.x, normal.x), mul(basis2Vec.y, normal.y)), mul(basis2Vec.z, normal.z));
     const dot3 = add(add(mul(basis3Vec.x, normal.x), mul(basis3Vec.y, normal.y)), mul(basis3Vec.z, normal.z));
 
-    // Multiply each dot product by its corresponding basis lightmap and sum
-    const rnmComponent1 = mul(basisLightmap1, dot1);
-    const rnmComponent2 = mul(basisLightmap2, dot2);
-    const rnmComponent3 = mul(basisLightmap3, dot3);
+    // Multiply each dot product by its corresponding basis lightmap (only if enabled)
+    const rnmComponent1 = enableBasis1 ? mul(basisLightmap1, dot1) : vec3(0.0, 0.0, 0.0);
+    const rnmComponent2 = enableBasis2 ? mul(basisLightmap2, dot2) : vec3(0.0, 0.0, 0.0);
+    const rnmComponent3 = enableBasis3 ? mul(basisLightmap3, dot3) : vec3(0.0, 0.0, 0.0);
     const rnmColor = add(add(rnmComponent1, rnmComponent2), rnmComponent3);
 
     // Apply intensity - blend between diffuse lightmap and RNM
@@ -152,7 +155,10 @@ export function updateRNMMaterialIntensity(mesh, intensity) {
             material.userData.rnmBasis1,
             material.userData.rnmBasis2,
             material.userData.rnmBasis3,
-            intensity
+            intensity,
+            material.userData.rnmEnableBasis1,
+            material.userData.rnmEnableBasis2,
+            material.userData.rnmEnableBasis3
         );
         // Preserve debug mode
         newMaterial.userData.rnmDebugMode = material.userData.rnmDebugMode;
@@ -175,7 +181,10 @@ export function updateRNMMaterialDebugMode(mesh, enabled) {
             material.userData.rnmBasis1,
             material.userData.rnmBasis2,
             material.userData.rnmBasis3,
-            material.userData.rnmIntensity
+            material.userData.rnmIntensity,
+            material.userData.rnmEnableBasis1,
+            material.userData.rnmEnableBasis2,
+            material.userData.rnmEnableBasis3
         );
         // Set debug mode (will be used in next recreation)
         newMaterial.userData.rnmDebugMode = enabled ? 1 : 0;
@@ -183,5 +192,31 @@ export function updateRNMMaterialDebugMode(mesh, enabled) {
         material.dispose();
     } else {
         console.warn('RNM: Cannot update debug mode - no RNM data found');
+    }
+}
+
+/**
+ * Updates basis enable/disable flags
+ */
+export function updateRNMBasisToggles(mesh, enableBasis1, enableBasis2, enableBasis3) {
+    const material = mesh.material;
+    if (material.userData.rnmOriginalMaterial) {
+        console.log('RNM: Recreating material with basis toggles', enableBasis1, enableBasis2, enableBasis3);
+        const newMaterial = createRNMMaterial(
+            material.userData.rnmOriginalMaterial,
+            material.userData.rnmBasis1,
+            material.userData.rnmBasis2,
+            material.userData.rnmBasis3,
+            material.userData.rnmIntensity,
+            enableBasis1,
+            enableBasis2,
+            enableBasis3
+        );
+        // Preserve debug mode
+        newMaterial.userData.rnmDebugMode = material.userData.rnmDebugMode;
+        mesh.material = newMaterial;
+        material.dispose();
+    } else {
+        console.warn('RNM: Cannot update basis toggles - no RNM data found');
     }
 }
