@@ -4,6 +4,9 @@ import {
     texture,
     add,
     mul,
+    dot,
+    clamp,
+    saturate,
     mix,
     uniform,
     normalGeometry,
@@ -110,9 +113,9 @@ export function createRNMMaterial(originalMaterial, directionalBasis1, direction
     const diffuseLightmap = texture(originalMaterial.lightMap, lightmapUV).rgb;
 
     // Constant basis vectors
-    const basis1Vec = vec3(1.225, 0.0, 0.577);
-    const basis2Vec = vec3(-0.408, -0.707, 0.577);
-    const basis3Vec = vec3(-0.408, 0.707, 0.577);
+    const basis1Vec = vec3(1.225, 0.0, 0.577).normalize();
+    const basis2Vec = vec3(-0.408, -0.707, 0.577).normalize();
+    const basis3Vec = vec3(-0.408, 0.707, 0.577).normalize();
 
     // Debug visualization: show average of basis lightmaps
     const avgBasis = add(add(basisLightmap1, basisLightmap2), basisLightmap3).div(3.0);
@@ -120,9 +123,9 @@ export function createRNMMaterial(originalMaterial, directionalBasis1, direction
 
     // RNM calculation: dot(basisVec, normal) * basisLightmap
     // Dot product each constant basis vector with the surface normal
-    const dot1 = add(add(mul(basis1Vec.x, normal.x), mul(basis1Vec.y, normal.y)), mul(basis1Vec.z, normal.z));
-    const dot2 = add(add(mul(basis2Vec.x, normal.x), mul(basis2Vec.y, normal.y)), mul(basis2Vec.z, normal.z));
-    const dot3 = add(add(mul(basis3Vec.x, normal.x), mul(basis3Vec.y, normal.y)), mul(basis3Vec.z, normal.z));
+    const dot1 = saturate(dot(basis1Vec, normal));
+    const dot2 = saturate(dot(basis2Vec, normal));
+    const dot3 = saturate(dot(basis3Vec, normal));
 
     // Scale basis lightmaps so they sum to the diffuse lightmap
     // This ensures energy comes from high-res diffuse, direction from low-res basis
@@ -135,12 +138,12 @@ export function createRNMMaterial(originalMaterial, directionalBasis1, direction
 
     // Calculate scale factor: diffuse / basisSum (per color channel)
     // This scales basis values so they sum to the diffuse value
-    const scaleFactor = diffuseLightmap.div(basisSum.max(0.001));
+    const scaleFactor = diffuseLightmap.max(0.002).div(basisSum.max(0.001));
 
     // Scale each basis lightmap
-    const scaledBasis1 = enableBasis1 ? mul(basisLightmap1, scaleFactor) : vec3(0.0, 0.0, 0.0);
-    const scaledBasis2 = enableBasis2 ? mul(basisLightmap2, scaleFactor) : vec3(0.0, 0.0, 0.0);
-    const scaledBasis3 = enableBasis3 ? mul(basisLightmap3, scaleFactor) : vec3(0.0, 0.0, 0.0);
+    const scaledBasis1 = enableBasis1 ? mul(basisLightmap1, scaleFactor).max(0.05) : vec3(0.0, 0.0, 0.0);
+    const scaledBasis2 = enableBasis2 ? mul(basisLightmap2, scaleFactor).max(0.05) : vec3(0.0, 0.0, 0.0);
+    const scaledBasis3 = enableBasis3 ? mul(basisLightmap3, scaleFactor).max(0.05) : vec3(0.0, 0.0, 0.0);
 
     // Apply normal-dependent weighting (dot products)
     const rnmComponent1 = mul(scaledBasis1, dot1);
