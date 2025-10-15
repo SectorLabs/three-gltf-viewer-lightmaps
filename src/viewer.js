@@ -35,6 +35,7 @@ import { GUI } from 'dat.gui';
 
 import { environments } from './environments.js';
 import { GLTFMOZLightMapExtension, GLTFMozTextureRGBE } from './gltfExtensions';
+import { createRNMMaterial, updateRNMMaterialIntensity, updateRNMMaterialDebugMode } from './rnmMaterial.js';
 
 const DEFAULT_CAMERA = '[default]';
 
@@ -90,6 +91,10 @@ export class Viewer {
 			bgColor: '#191919',
 
 			pointSize: 1.0,
+
+			// RNM (Radiosity Normal Mapping)
+			directionalIntensity: 0.3,
+			rnmDebug: false,
 		};
 
 		this.prevTime = 0;
@@ -279,6 +284,38 @@ export class Viewer {
 							} else {
 								child.material.lightsNode = noLightsNode;
 								child.material.envMapIntensity = 0;
+
+								// Apply RNM shader if directional basis textures are present
+								const mat = child.material;
+
+								console.log('RNM: Checking material', mat.name || 'unnamed', {
+									materialUUID: mat.uuid,
+									hasLightMap: !!mat.lightMap,
+									hasBasis1: !!mat.directionalBasis1,
+									hasBasis2: !!mat.directionalBasis2,
+									hasBasis3: !!mat.directionalBasis3,
+									basis1IsTexture: mat.directionalBasis1?.isTexture,
+									basis1Type: mat.directionalBasis1?.constructor?.name,
+									allMaterialKeys: Object.keys(mat).filter(k => k.includes('directional') || k.includes('basis'))
+								});
+
+								if (mat.directionalBasis1 && mat.directionalBasis2 && mat.directionalBasis3) {
+									console.log('RNM: Replacing material with custom NodeMaterial', mat.name || 'unnamed');
+
+									// Create custom NodeMaterial with RNM
+									const rnmMaterial = createRNMMaterial(
+										mat,
+										mat.directionalBasis1,
+										mat.directionalBasis2,
+										mat.directionalBasis3,
+										this.state.directionalIntensity
+									);
+
+									// Replace the mesh's material
+									child.material = rnmMaterial;
+
+									console.log('RNM: Material replaced successfully');
+								}
 							}
 
 							if (child?.material?.transmission && child?.material?.transmission  > 0.7) {
@@ -593,6 +630,28 @@ export class Viewer {
 		this.backgroundColor.set(this.state.bgColor);
 	}
 
+	updateDirectionalIntensity() {
+		if (!this.content) return;
+
+		// Update the directional intensity for all meshes with RNM materials
+		this.content.traverse((node) => {
+			if (node.isMesh && node.material && node.material.userData.rnmOriginalMaterial) {
+				updateRNMMaterialIntensity(node, this.state.directionalIntensity);
+			}
+		});
+	}
+
+	updateRNMDebug() {
+		if (!this.content) return;
+
+		// Update debug mode for all meshes with RNM materials
+		this.content.traverse((node) => {
+			if (node.isMesh && node.material && node.material.userData.rnmOriginalMaterial) {
+				updateRNMMaterialDebugMode(node, this.state.rnmDebug);
+			}
+		});
+	}
+
 	/**
 	 * Adds AxesHelper.
 	 *
@@ -665,6 +724,15 @@ export class Viewer {
 			lightFolder.add(this.state, 'directIntensity', 0, 4), // TODO(#116)
 			lightFolder.addColor(this.state, 'directColor'),
 		].forEach((ctrl) => ctrl.onChange(() => this.updateLights()));
+
+		// RNM (Radiosity Normal Mapping) controls
+		const directionalIntensityCtrl = lightFolder.add(this.state, 'directionalIntensity', 0, 1, 0.01);
+		directionalIntensityCtrl.name('RNM Intensity');
+		directionalIntensityCtrl.onChange(() => this.updateDirectionalIntensity());
+
+		const rnmDebugCtrl = lightFolder.add(this.state, 'rnmDebug');
+		rnmDebugCtrl.name('RNM Debug');
+		rnmDebugCtrl.onChange(() => this.updateRNMDebug());
 
 		// Animation controls.
 		this.animFolder = gui.addFolder('Animation');
