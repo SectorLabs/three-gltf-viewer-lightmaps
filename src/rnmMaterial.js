@@ -10,8 +10,12 @@ import {
     uv,
     positionWorld,
     normalWorld,
-    normalMap,
+    tangentLocal,
+    bitangentLocal,
+    normalLocal,
+    modelWorldMatrix,
     vec3,
+    vec4,
     float as floatNode
 } from 'three/tsl';
 
@@ -76,13 +80,24 @@ export function createRNMMaterial(originalMaterial, directionalBasis1, direction
     // Get lightmap UV (second UV channel)
     const lightmapUV = uv(1);
 
-    // Get normal - use normal map if available, otherwise use geometry normal
+    // Get normal - use normal map if available to add fine detail to low-res RNM
+    // The normal map provides high-frequency detail that modulates the directional lighting
     let normal;
     if (originalMaterial.normalMap) {
-        // Apply normal mapping
-        normal = normalMap(texture(originalMaterial.normalMap, uv(0)));
+        // Sample normal map (in tangent space, stored as [0,1])
+        const normalMapSample = texture(originalMaterial.normalMap, uv(0)).xyz;
+        // Convert from [0,1] to [-1,1]
+        const tangentNormal = normalMapSample.mul(2.0).sub(1.0);
+
+        // Build TBN matrix in world space (view-independent)
+        // Transform tangent and bitangent to world space
+        const T = modelWorldMatrix.mul(vec4(tangentLocal, 0.0)).xyz.normalize();
+        const B = modelWorldMatrix.mul(vec4(bitangentLocal, 0.0)).xyz.normalize();
+        const N = normalWorld;
+
+        // Transform tangent-space normal to world space
+        normal = add(add(T.mul(tangentNormal.x), B.mul(tangentNormal.y)), N.mul(tangentNormal.z)).normalize();
     } else {
-        // Use world-space geometry normal
         normal = normalWorld;
     }
 
@@ -109,16 +124,31 @@ export function createRNMMaterial(originalMaterial, directionalBasis1, direction
     const dot2 = add(add(mul(basis2Vec.x, normal.x), mul(basis2Vec.y, normal.y)), mul(basis2Vec.z, normal.z));
     const dot3 = add(add(mul(basis3Vec.x, normal.x), mul(basis3Vec.y, normal.y)), mul(basis3Vec.z, normal.z));
 
-    // Multiply each dot product by its corresponding basis lightmap (only if enabled)
-    const rnmComponent1 = enableBasis1 ? mul(basisLightmap1, dot1) : vec3(0.0, 0.0, 0.0);
-    const rnmComponent2 = enableBasis2 ? mul(basisLightmap2, dot2) : vec3(0.0, 0.0, 0.0);
-    const rnmComponent3 = enableBasis3 ? mul(basisLightmap3, dot3) : vec3(0.0, 0.0, 0.0);
-    const rnmColor = add(add(rnmComponent1, rnmComponent2), rnmComponent3);
+    // Scale basis lightmaps so they sum to the diffuse lightmap
+    // This ensures energy comes from high-res diffuse, direction from low-res basis
 
-    // Apply intensity - blend between diffuse lightmap and RNM
-    // When intensity = 0: use 100% diffuse lightmap
-    // When intensity = 1: use 100% RNM
-    const rnmLighting = mul(rnmColor, diffuseLightmap);
+    // Sum of all basis lightmaps (before dot product weighting)
+    const basisSum = add(add(
+        enableBasis1 ? basisLightmap1 : vec3(0.0, 0.0, 0.0),
+        enableBasis2 ? basisLightmap2 : vec3(0.0, 0.0, 0.0)
+    ), enableBasis3 ? basisLightmap3 : vec3(0.0, 0.0, 0.0));
+
+    // Calculate scale factor: diffuse / basisSum (per color channel)
+    // This scales basis values so they sum to the diffuse value
+    const scaleFactor = diffuseLightmap.div(basisSum.max(0.001));
+
+    // Scale each basis lightmap
+    const scaledBasis1 = enableBasis1 ? mul(basisLightmap1, scaleFactor) : vec3(0.0, 0.0, 0.0);
+    const scaledBasis2 = enableBasis2 ? mul(basisLightmap2, scaleFactor) : vec3(0.0, 0.0, 0.0);
+    const scaledBasis3 = enableBasis3 ? mul(basisLightmap3, scaleFactor) : vec3(0.0, 0.0, 0.0);
+
+    // Apply normal-dependent weighting (dot products)
+    const rnmComponent1 = mul(scaledBasis1, dot1);
+    const rnmComponent2 = mul(scaledBasis2, dot2);
+    const rnmComponent3 = mul(scaledBasis3, dot3);
+
+    // Final RNM result: sum of normal-weighted, scaled basis values
+    const rnmLighting = add(add(rnmComponent1, rnmComponent2), rnmComponent3);
 
     // Choose between debug and normal mode
     const rnmContribution = mix(rnmLighting, debugColor, debugModeUniform);
