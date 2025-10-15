@@ -10,6 +10,7 @@ import {
     uv,
     positionWorld,
     normalWorld,
+    normalMap,
     vec3,
     float as floatNode
 } from 'three/tsl';
@@ -75,8 +76,15 @@ export function createRNMMaterial(originalMaterial, directionalBasis1, direction
     // Get lightmap UV (second UV channel)
     const lightmapUV = uv(1);
 
-    // Get world normal
-    const normal = normalWorld;
+    // Get normal - use normal map if available, otherwise use geometry normal
+    let normal;
+    if (originalMaterial.normalMap) {
+        // Apply normal mapping
+        normal = normalMap(texture(originalMaterial.normalMap, uv(0)));
+    } else {
+        // Use world-space geometry normal
+        normal = normalWorld;
+    }
 
     // Sample the three basis lightmaps (RGB lighting for each basis direction)
     const basisLightmap1 = texture(directionalBasis1, lightmapUV).rgb;
