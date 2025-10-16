@@ -5,21 +5,16 @@ import {
     add,
     mul,
     dot,
-    clamp,
     saturate,
     mix,
     uniform,
-    normalGeometry,
     uv,
-    positionWorld,
     normalWorld,
     tangentLocal,
     bitangentLocal,
-    normalLocal,
     modelWorldMatrix,
     vec3,
-    vec4,
-    float as floatNode
+    vec4
 } from 'three/tsl';
 
 /**
@@ -62,11 +57,10 @@ export function createRNMMaterial(originalMaterial, directionalBasis1, direction
     // Store reference to base color map for node generation
     const baseColorMap = originalMaterial.map;
 
-    // Create uniforms for RNM control
+    // Create intensity uniform for RNM control
     const intensityUniform = uniform(directionalIntensity);
-    const debugModeUniform = uniform(0);
 
-    // Store original material and basis textures so we can recreate on intensity change
+    // Store original material and settings for later recreation
     material.userData = {
         ...originalMaterial.userData,
         rnmOriginalMaterial: originalMaterial,
@@ -74,7 +68,6 @@ export function createRNMMaterial(originalMaterial, directionalBasis1, direction
         rnmBasis2: directionalBasis2,
         rnmBasis3: directionalBasis3,
         rnmIntensity: directionalIntensity,
-        rnmDebugMode: 0,
         rnmEnableBasis1: enableBasis1,
         rnmEnableBasis2: enableBasis2,
         rnmEnableBasis3: enableBasis3
@@ -104,61 +97,40 @@ export function createRNMMaterial(originalMaterial, directionalBasis1, direction
         normal = normalWorld;
     }
 
-    // Sample the three basis lightmaps (RGB lighting for each basis direction)
+    // Sample lightmaps
     const basisLightmap1 = texture(directionalBasis1, lightmapUV).rgb;
     const basisLightmap2 = texture(directionalBasis2, lightmapUV).rgb;
     const basisLightmap3 = texture(directionalBasis3, lightmapUV).rgb;
-
-    // Sample diffuse lightmap
     const diffuseLightmap = texture(originalMaterial.lightMap, lightmapUV).rgb;
 
-    // Constant basis vectors
+    // Constant basis vectors (normalized)
     const basis1Vec = vec3(1.225, 0.0, 0.577).normalize();
     const basis2Vec = vec3(-0.408, -0.707, 0.577).normalize();
     const basis3Vec = vec3(-0.408, 0.707, 0.577).normalize();
 
-    // Debug visualization: show average of basis lightmaps
-    const avgBasis = add(add(basisLightmap1, basisLightmap2), basisLightmap3).div(3.0);
-    const debugColor = avgBasis.mul(5.0);
-
-    // RNM calculation: dot(basisVec, normal) * basisLightmap
-    // Dot product each constant basis vector with the surface normal
+    // Calculate dot products (saturated to [0,1])
     const dot1 = saturate(dot(basis1Vec, normal));
     const dot2 = saturate(dot(basis2Vec, normal));
     const dot3 = saturate(dot(basis3Vec, normal));
 
-    // Scale basis lightmaps so they sum to the diffuse lightmap
-    // This ensures energy comes from high-res diffuse, direction from low-res basis
-
-    // Sum of all basis lightmaps (before dot product weighting)
+    // Scale basis lightmaps to match diffuse energy (per color channel)
     const basisSum = add(add(
         enableBasis1 ? basisLightmap1 : vec3(0.0, 0.0, 0.0),
         enableBasis2 ? basisLightmap2 : vec3(0.0, 0.0, 0.0)
     ), enableBasis3 ? basisLightmap3 : vec3(0.0, 0.0, 0.0));
 
-    // Calculate scale factor: diffuse / basisSum (per color channel)
-    // This scales basis values so they sum to the diffuse value
     const scaleFactor = diffuseLightmap.max(0.002).div(basisSum.max(0.001));
 
-    // Scale each basis lightmap
-    const scaledBasis1 = enableBasis1 ? mul(basisLightmap1, scaleFactor).max(0.05) : vec3(0.0, 0.0, 0.0);
-    const scaledBasis2 = enableBasis2 ? mul(basisLightmap2, scaleFactor).max(0.05) : vec3(0.0, 0.0, 0.0);
-    const scaledBasis3 = enableBasis3 ? mul(basisLightmap3, scaleFactor).max(0.05) : vec3(0.0, 0.0, 0.0);
+    // Apply scaling and normal weighting
+    const rnmComponent1 = enableBasis1 ? mul(mul(basisLightmap1, scaleFactor).max(0.05), dot1) : vec3(0.0, 0.0, 0.0);
+    const rnmComponent2 = enableBasis2 ? mul(mul(basisLightmap2, scaleFactor).max(0.05), dot2) : vec3(0.0, 0.0, 0.0);
+    const rnmComponent3 = enableBasis3 ? mul(mul(basisLightmap3, scaleFactor).max(0.05), dot3) : vec3(0.0, 0.0, 0.0);
 
-    // Apply normal-dependent weighting (dot products)
-    const rnmComponent1 = mul(scaledBasis1, dot1);
-    const rnmComponent2 = mul(scaledBasis2, dot2);
-    const rnmComponent3 = mul(scaledBasis3, dot3);
-
-    // Final RNM result: sum of normal-weighted, scaled basis values
+    // Final RNM lighting
     const rnmLighting = add(add(rnmComponent1, rnmComponent2), rnmComponent3);
 
-    // Choose between debug and normal mode
-    const rnmContribution = mix(rnmLighting, debugColor, debugModeUniform);
-
     // Blend between diffuse and RNM based on intensity
-    // mix(diffuse, rnm, intensity) = diffuse * (1 - intensity) + rnm * intensity
-    const finalLightmap = mix(diffuseLightmap, rnmContribution, intensityUniform);
+    const finalLightmap = mix(diffuseLightmap, rnmLighting, intensityUniform);
 
     // Get base color (from texture or solid color)
     let baseColor;
@@ -190,7 +162,6 @@ export function createRNMMaterial(originalMaterial, directionalBasis1, direction
 export function updateRNMMaterialIntensity(mesh, intensity) {
     const material = mesh.material;
     if (material.userData.rnmOriginalMaterial) {
-        console.log('RNM: Recreating material with intensity', intensity);
         const newMaterial = createRNMMaterial(
             material.userData.rnmOriginalMaterial,
             material.userData.rnmBasis1,
@@ -201,40 +172,11 @@ export function updateRNMMaterialIntensity(mesh, intensity) {
             material.userData.rnmEnableBasis2,
             material.userData.rnmEnableBasis3
         );
-        // Preserve debug mode
-        newMaterial.userData.rnmDebugMode = material.userData.rnmDebugMode;
         mesh.material = newMaterial;
         material.dispose();
-    } else {
-        console.warn('RNM: Cannot update intensity - no RNM data found on material');
     }
 }
 
-/**
- * Updates RNM debug mode for a material
- */
-export function updateRNMMaterialDebugMode(mesh, enabled) {
-    const material = mesh.material;
-    if (material.userData.rnmOriginalMaterial) {
-        console.log('RNM: Recreating material with debug mode', enabled);
-        const newMaterial = createRNMMaterial(
-            material.userData.rnmOriginalMaterial,
-            material.userData.rnmBasis1,
-            material.userData.rnmBasis2,
-            material.userData.rnmBasis3,
-            material.userData.rnmIntensity,
-            material.userData.rnmEnableBasis1,
-            material.userData.rnmEnableBasis2,
-            material.userData.rnmEnableBasis3
-        );
-        // Set debug mode (will be used in next recreation)
-        newMaterial.userData.rnmDebugMode = enabled ? 1 : 0;
-        mesh.material = newMaterial;
-        material.dispose();
-    } else {
-        console.warn('RNM: Cannot update debug mode - no RNM data found');
-    }
-}
 
 /**
  * Updates basis enable/disable flags
@@ -242,7 +184,6 @@ export function updateRNMMaterialDebugMode(mesh, enabled) {
 export function updateRNMBasisToggles(mesh, enableBasis1, enableBasis2, enableBasis3) {
     const material = mesh.material;
     if (material.userData.rnmOriginalMaterial) {
-        console.log('RNM: Recreating material with basis toggles', enableBasis1, enableBasis2, enableBasis3);
         const newMaterial = createRNMMaterial(
             material.userData.rnmOriginalMaterial,
             material.userData.rnmBasis1,
@@ -253,11 +194,7 @@ export function updateRNMBasisToggles(mesh, enableBasis1, enableBasis2, enableBa
             enableBasis2,
             enableBasis3
         );
-        // Preserve debug mode
-        newMaterial.userData.rnmDebugMode = material.userData.rnmDebugMode;
         mesh.material = newMaterial;
         material.dispose();
-    } else {
-        console.warn('RNM: Cannot update basis toggles - no RNM data found');
     }
 }

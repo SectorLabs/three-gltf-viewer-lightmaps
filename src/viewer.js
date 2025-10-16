@@ -35,7 +35,7 @@ import { GUI } from 'dat.gui';
 
 import { environments } from './environments.js';
 import { GLTFMOZLightMapExtension, GLTFMozTextureRGBE } from './gltfExtensions';
-import { createRNMMaterial, updateRNMMaterialIntensity, updateRNMMaterialDebugMode, updateRNMBasisToggles } from './rnmMaterial.js';
+import { createRNMMaterial, updateRNMMaterialIntensity, updateRNMBasisToggles } from './rnmMaterial.js';
 
 const DEFAULT_CAMERA = '[default]';
 
@@ -94,7 +94,6 @@ export class Viewer {
 
 			// RNM (Radiosity Normal Mapping)
 			directionalIntensity: 0.3,
-			rnmDebug: false,
 			rnmBasis1: true,
 			rnmBasis2: true,
 			rnmBasis3: true,
@@ -644,17 +643,6 @@ export class Viewer {
 		});
 	}
 
-	updateRNMDebug() {
-		if (!this.content) return;
-
-		// Update debug mode for all meshes with RNM materials
-		this.content.traverse((node) => {
-			if (node.isMesh && node.material && node.material.userData.rnmOriginalMaterial) {
-				updateRNMMaterialDebugMode(node, this.state.rnmDebug);
-			}
-		});
-	}
-
 	updateRNMBasisToggles() {
 		if (!this.content) return;
 
@@ -743,10 +731,6 @@ export class Viewer {
 		const directionalIntensityCtrl = lightFolder.add(this.state, 'directionalIntensity', 0, 1, 0.01);
 		directionalIntensityCtrl.name('RNM Intensity');
 		directionalIntensityCtrl.onChange(() => this.updateDirectionalIntensity());
-
-		const rnmDebugCtrl = lightFolder.add(this.state, 'rnmDebug');
-		rnmDebugCtrl.name('RNM Debug');
-		rnmDebugCtrl.onChange(() => this.updateRNMDebug());
 
 		const rnmBasis1Ctrl = lightFolder.add(this.state, 'rnmBasis1');
 		rnmBasis1Ctrl.name('Enable Basis 1');
