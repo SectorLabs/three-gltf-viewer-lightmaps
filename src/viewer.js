@@ -35,7 +35,7 @@ import { GUI } from 'dat.gui';
 
 import { environments } from './environments.js';
 import { GLTFMOZLightMapExtension, GLTFMozTextureRGBE } from './gltfExtensions';
-import { createRNMMaterial, updateRNMMaterialIntensity, updateRNMBasisToggles } from './rnmMaterial.js';
+import { createRNMMaterial, updateRNMMaterialIntensity, updateRNMBasisToggles, updateRNMSpecularIntensity } from './rnmMaterial.js';
 
 const DEFAULT_CAMERA = '[default]';
 
@@ -97,6 +97,7 @@ export class Viewer {
 			rnmBasis1: true,
 			rnmBasis2: true,
 			rnmBasis3: true,
+			specularIntensity: 1.0,
 		};
 
 		this.prevTime = 0;
@@ -304,13 +305,21 @@ export class Viewer {
 								if (mat.directionalBasis1 && mat.directionalBasis2 && mat.directionalBasis3) {
 									console.log('RNM: Replacing material with custom NodeMaterial', mat.name || 'unnamed');
 
+									// Get current environment map from scene
+									const envMap = this.scene.environment;
+
 									// Create custom NodeMaterial with RNM
 									const rnmMaterial = createRNMMaterial(
 										mat,
 										mat.directionalBasis1,
 										mat.directionalBasis2,
 										mat.directionalBasis3,
-										this.state.directionalIntensity
+										this.state.directionalIntensity,
+										true, // enableBasis1
+										true, // enableBasis2
+										true, // enableBasis3
+										this.state.specularIntensity,
+										envMap
 									);
 
 									// Replace the mesh's material
@@ -560,6 +569,29 @@ export class Viewer {
 		this.getCubeMapTexture(environment).then(({ envMap }) => {
 			this.scene.environment = envMap;
 			this.scene.background = this.state.background ? envMap : this.backgroundColor;
+
+			// Recreate RNM materials with new environment map for specular
+			if (this.content) {
+				this.content.traverse((node) => {
+					if (node.isMesh && node.material && node.material.userData.rnmOriginalMaterial) {
+						const mat = node.material;
+						const newMaterial = createRNMMaterial(
+							mat.userData.rnmOriginalMaterial,
+							mat.userData.rnmBasis1,
+							mat.userData.rnmBasis2,
+							mat.userData.rnmBasis3,
+							mat.userData.rnmIntensity,
+							mat.userData.rnmEnableBasis1,
+							mat.userData.rnmEnableBasis2,
+							mat.userData.rnmEnableBasis3,
+							mat.userData.rnmSpecularIntensity,
+							envMap
+						);
+						node.material = newMaterial;
+						mat.dispose();
+					}
+				});
+			}
 		});
 	}
 
@@ -654,6 +686,17 @@ export class Viewer {
 		});
 	}
 
+	updateSpecularIntensity() {
+		if (!this.content) return;
+
+		// Update specular intensity for all meshes with RNM materials
+		this.content.traverse((node) => {
+			if (node.isMesh && node.material && node.material.userData.rnmOriginalMaterial) {
+				updateRNMSpecularIntensity(node, this.state.specularIntensity);
+			}
+		});
+	}
+
 	/**
 	 * Adds AxesHelper.
 	 *
@@ -743,6 +786,10 @@ export class Viewer {
 		const rnmBasis3Ctrl = lightFolder.add(this.state, 'rnmBasis3');
 		rnmBasis3Ctrl.name('Enable Basis 3');
 		rnmBasis3Ctrl.onChange(() => this.updateRNMBasisToggles());
+
+		const specularIntensityCtrl = lightFolder.add(this.state, 'specularIntensity', 0, 2, 0.01);
+		specularIntensityCtrl.name('Specular Intensity');
+		specularIntensityCtrl.onChange(() => this.updateSpecularIntensity());
 
 		// Animation controls.
 		this.animFolder = gui.addFolder('Animation');
