@@ -19,6 +19,7 @@ import {
 	Vector3,
 	LinearToneMapping,
 	ACESFilmicToneMapping,
+	AgXToneMapping,
 	WebGPURenderer
 } from 'three/webgpu';
 import { lights } from 'three/tsl';
@@ -36,6 +37,7 @@ import { GUI } from 'dat.gui';
 import { environments } from './environments.js';
 import { GLTFMOZLightMapExtension, GLTFMozTextureRGBE } from './gltfExtensions';
 import { createRNMMaterial, updateRNMMaterialIntensity, updateRNMBasisToggles, updateRNMSpecularIntensity } from './rnmMaterial.js';
+import { NeutralToneMapping } from 'three';
 
 const DEFAULT_CAMERA = '[default]';
 
@@ -83,12 +85,12 @@ export class Viewer {
 			// Lights
 			punctualLights: true,
 			exposure: 0.0,
-			toneMapping: ACESFilmicToneMapping,
+			toneMapping: NeutralToneMapping,
 			ambientIntensity: 0.0,
 			ambientColor: '#FFFFFF',
 			directIntensity: 0 * 0.8 * Math.PI, // TODO(#116)
 			directColor: '#FFFFFF',
-			bgColor: '#191919',
+			bgColor: '#cecece',
 
 			pointSize: 1.0,
 
@@ -174,8 +176,8 @@ export class Viewer {
 	resize() {
 		const { clientHeight, clientWidth } = this.el.parentElement;
 
-		this.defaultCamera.aspect = clientWidth / clientHeight;
-		this.defaultCamera.updateProjectionMatrix();
+		this.activeCamera.aspect = clientWidth / clientHeight;
+		this.activeCamera.updateProjectionMatrix();
 		this.renderer.setSize(clientWidth, clientHeight);
 
 		this.axesCamera.aspect = this.axesDiv.clientWidth / this.axesDiv.clientHeight;
@@ -466,6 +468,8 @@ export class Viewer {
 				}
 			});
 		}
+
+		this.resize();
 	}
 
 	updateLights() {
@@ -761,6 +765,8 @@ export class Viewer {
 			lightFolder.add(this.state, 'toneMapping', {
 				Linear: LinearToneMapping,
 				'ACES Filmic': ACESFilmicToneMapping,
+				'Neutral': NeutralToneMapping,
+				'Agx': AgXToneMapping,
 			}),
 			lightFolder.add(this.state, 'exposure', -10, 10, 0.01),
 			lightFolder.add(this.state, 'punctualLights').listen(),
