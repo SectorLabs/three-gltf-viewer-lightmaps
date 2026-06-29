@@ -18,7 +18,7 @@
 		]
 	},
 	"scripts": {
-		"dev": "vite --port 3000",
+		"dev": "vite --port 5000",
 		"build": "vite build",
 		"clean": "rm -rf dist/* || true",
 		"test": "node test/gen_test.js",
@@ -30,7 +30,7 @@
 		"gltf-validator": "^2.0.0-dev.3.10",
 		"query-string": "^8.1.0",
 		"simple-dropzone": "^0.8.3",
-		"three": "^0.180.0",
+		"three": "^0.185.0",
 		"vhtml": "^2.2.0"
 	},
 	"devDependencies": {

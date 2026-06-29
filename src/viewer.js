@@ -20,7 +20,7 @@ import {
 	LinearToneMapping,
 	ACESFilmicToneMapping,
 	AgXToneMapping,
-	WebGPURenderer
+	WebGPURenderer,
 } from 'three/webgpu';
 import { lights } from 'three/tsl';
 import Stats from 'three/addons/libs/stats.module.js';
@@ -36,7 +36,12 @@ import { GUI } from 'dat.gui';
 
 import { environments } from './environments.js';
 import { GLTFMOZLightMapExtension, GLTFMozTextureRGBE } from './gltfExtensions';
-import { createRNMMaterial, updateRNMMaterialIntensity, updateRNMBasisToggles, updateRNMSpecularIntensity } from './rnmMaterial.js';
+import {
+	createRNMMaterial,
+	updateRNMMaterialIntensity,
+	updateRNMBasisToggles,
+	updateRNMSpecularIntensity,
+} from './rnmMaterial.js';
 import { NeutralToneMapping } from 'three';
 
 const DEFAULT_CAMERA = '[default]';
@@ -185,8 +190,13 @@ export class Viewer {
 		this.axesRenderer.setSize(this.axesDiv.clientWidth, this.axesDiv.clientHeight);
 	}
 
-	load(url, rootPath, assetMap) {
+	async load(url, rootPath, assetMap) {
 		const baseURL = LoaderUtils.extractUrlBase(url);
+
+		// WebGPU/WebGL backend isn't initialized until init() resolves in r185+.
+		// KTX2Loader.detectSupport() calls renderer.hasFeature(), which throws
+		// before the backend exists.
+		await this.renderer.init();
 
 		// Load.
 		return new Promise((resolve, reject) => {
@@ -222,13 +232,12 @@ export class Viewer {
 					(parser) =>
 						new GLTFMozTextureRGBE(parser, (mimeType) => {
 							if (mimeType === 'image/vnd.radiance') {
-								return new RGBELoader().setDataType(THREE.HalfFloatType)
+								return new RGBELoader().setDataType(THREE.HalfFloatType);
 							}
 							if (mimeType === 'image/x-exr') {
-								return new EXRLoader().setDataType(THREE.HalfFloatType)
+								return new EXRLoader().setDataType(THREE.HalfFloatType);
 							}
-
-						})
+						}),
 				)
 				.register((parser) => new GLTFMOZLightMapExtension(parser));
 
@@ -258,7 +267,7 @@ export class Viewer {
 						}
 					});
 
-					directionalLights.forEach(directionalLight => {
+					directionalLights.forEach((directionalLight) => {
 						directionalLight.removeFromParent();
 					});
 
@@ -267,7 +276,7 @@ export class Viewer {
 					bbox.getBoundingSphere(bsphere);
 
 					if (!directionalLights[0]) {
-						const sun = new THREE.DirectionalLight( 0xffffee, 1 );
+						const sun = new THREE.DirectionalLight(0xffffee, 1);
 						sun.position.set(11, 11, 20);
 
 						this.setupSun(sun, bsphere);
@@ -275,8 +284,8 @@ export class Viewer {
 						this.setupSun(directionalLights[0], bsphere);
 					}
 
-					const sunLightsNode = lights( [ this.sun ] );
-                	const noLightsNode = lights( [ ] );
+					const sunLightsNode = lights([this.sun]);
+					const noLightsNode = lights([]);
 
 					scene.traverse((child) => {
 						if (child.isMesh) {
@@ -301,11 +310,20 @@ export class Viewer {
 									hasBasis3: !!mat.directionalBasis3,
 									basis1IsTexture: mat.directionalBasis1?.isTexture,
 									basis1Type: mat.directionalBasis1?.constructor?.name,
-									allMaterialKeys: Object.keys(mat).filter(k => k.includes('directional') || k.includes('basis'))
+									allMaterialKeys: Object.keys(mat).filter(
+										(k) => k.includes('directional') || k.includes('basis'),
+									),
 								});
 
-								if (mat.directionalBasis1 && mat.directionalBasis2 && mat.directionalBasis3) {
-									console.log('RNM: Replacing material with custom NodeMaterial', mat.name || 'unnamed');
+								if (
+									mat.directionalBasis1 &&
+									mat.directionalBasis2 &&
+									mat.directionalBasis3
+								) {
+									console.log(
+										'RNM: Replacing material with custom NodeMaterial',
+										mat.name || 'unnamed',
+									);
 
 									// Get current environment map from scene
 									const envMap = this.scene.environment;
@@ -321,7 +339,7 @@ export class Viewer {
 										true, // enableBasis2
 										true, // enableBasis3
 										this.state.specularIntensity,
-										envMap
+										envMap,
 									);
 
 									// Replace the mesh's material
@@ -331,8 +349,11 @@ export class Viewer {
 								}
 							}
 
-							if (child?.material?.transmission && child?.material?.transmission  > 0.7) {
-								child.castShadow = false;  // transparent materials shouldn't cast shadows
+							if (
+								child?.material?.transmission &&
+								child?.material?.transmission > 0.7
+							) {
+								child.castShadow = false; // transparent materials shouldn't cast shadows
 								child.material.envMapIntensity = 1;
 								//child.material.metalness = 0.15;
 							}
@@ -513,57 +534,56 @@ export class Viewer {
 		this.lights.length = 0;
 	}
 
+	setupSun(directionalLight, bSphere) {
+		const sun = new THREE.DirectionalLight(0xffffee, 1);
+		sun.position.copy(directionalLight.position.add(bSphere.center)); //translate sun to optimize the shadow camera position
+		const buildingCenter = new THREE.Object3D();
+		buildingCenter.position.copy(bSphere.center);
+		this.scene.add(buildingCenter);
+		sun.target = buildingCenter;
+		sun.castShadow = true;
+		sun.shadow.mapSize.width = 1024;
+		sun.shadow.mapSize.height = 1024;
 
-    setupSun(directionalLight, bSphere) {
-        const sun = new THREE.DirectionalLight( 0xffffee, 1 );
-        sun.position.copy(directionalLight.position.add(bSphere.center)); //translate sun to optimize the shadow camera position
-        const buildingCenter = new THREE.Object3D();
-        buildingCenter.position.copy(bSphere.center);
-        this.scene.add(buildingCenter);
-        sun.target = buildingCenter;
-        sun.castShadow = true;
-        sun.shadow.mapSize.width = 1024;
-        sun.shadow.mapSize.height = 1024;
+		sun.shadow.bias = -0.003;
+		sun.shadow.radius = 5;
+		sun.shadow.blurSamples = 20;
+		sun.intensity = 1;
 
-        sun.shadow.bias = -0.003;
-        sun.shadow.radius = 5;
-        sun.shadow.blurSamples = 20;
-        sun.intensity = 1;
+		this.sun = sun;
+		this.scene.add(this.sun);
+		this.setupSunShadow(bSphere);
+		this.renderer.shadowMap.needsUpdate = true;
+		this.forceRender = true;
+	}
 
-        this.sun = sun;
-        this.scene.add(this.sun);
-        this.setupSunShadow(bSphere);
-        this.renderer.shadowMap.needsUpdate = true;
-        this.forceRender = true;
-    }
+	setupSunShadow(bSphere) {
+		const radius = bSphere.radius;
+		const sun = this.sun;
+		sun.shadow.camera.left = -bSphere.radius;
+		sun.shadow.camera.bottom = -bSphere.radius;
+		sun.shadow.camera.top = bSphere.radius;
+		sun.shadow.camera.right = bSphere.radius;
+		const distanceToCenter = sun.position.distanceTo(bSphere.center);
+		sun.shadow.camera.near = distanceToCenter - bSphere.radius;
+		const sunVector = sun.position.clone().sub(bSphere.center);
+		const projectedSunVector = sunVector.clone().projectOnPlane(new THREE.Vector3(0, 1, 0));
+		const alpha = sunVector.angleTo(projectedSunVector); //sun angle relative to the shadow plane
 
-    setupSunShadow(bSphere) {
-        const radius = bSphere.radius;
-        const sun = this.sun;
-        sun.shadow.camera.left = -bSphere.radius;
-        sun.shadow.camera.bottom = -bSphere.radius;
-        sun.shadow.camera.top = bSphere.radius;
-        sun.shadow.camera.right = bSphere.radius;
-        const distanceToCenter = sun.position.distanceTo(bSphere.center);
-        sun.shadow.camera.near = distanceToCenter - bSphere.radius;
-        const sunVector = sun.position.clone().sub(bSphere.center)
-        const projectedSunVector = sunVector.clone().projectOnPlane(new THREE.Vector3(0, 1, 0));
-        const alpha = sunVector.angleTo(projectedSunVector); //sun angle relative to the shadow plane
+		const y = radius + bSphere.center.y / Math.cos(alpha);
+		const x = y / Math.tan(alpha);
 
-        const y = radius + (bSphere.center.y / Math.cos(alpha));
-        const x = y / Math.tan(alpha);
-
-        sun.shadow.camera.far = distanceToCenter + Math.max(bSphere.radius, x);
-        if (this.options.debug) {
-            const helper = new THREE.CameraHelper(sun.shadow.camera);
-            this.scene.add(helper);
-            const boundingSphereGeometry = new THREE.SphereGeometry( bSphere.radius, 8, 8 );
-            const material = new THREE.MeshStandardMaterial( { color: 0xff0000, wireframe: true } );
-            const boundingSphere = new THREE.Mesh( boundingSphereGeometry, material );
-            boundingSphere.position.copy(bSphere.center);
-            this.scene.add( boundingSphere );
-        }
-    }
+		sun.shadow.camera.far = distanceToCenter + Math.max(bSphere.radius, x);
+		if (this.options.debug) {
+			const helper = new THREE.CameraHelper(sun.shadow.camera);
+			this.scene.add(helper);
+			const boundingSphereGeometry = new THREE.SphereGeometry(bSphere.radius, 8, 8);
+			const material = new THREE.MeshStandardMaterial({ color: 0xff0000, wireframe: true });
+			const boundingSphere = new THREE.Mesh(boundingSphereGeometry, material);
+			boundingSphere.position.copy(bSphere.center);
+			this.scene.add(boundingSphere);
+		}
+	}
 
 	updateEnvironment() {
 		const environment = environments.filter(
@@ -577,7 +597,11 @@ export class Viewer {
 			// Recreate RNM materials with new environment map for specular
 			if (this.content) {
 				this.content.traverse((node) => {
-					if (node.isMesh && node.material && node.material.userData.rnmOriginalMaterial) {
+					if (
+						node.isMesh &&
+						node.material &&
+						node.material.userData.rnmOriginalMaterial
+					) {
 						const mat = node.material;
 						const newMaterial = createRNMMaterial(
 							mat.userData.rnmOriginalMaterial,
@@ -589,7 +613,7 @@ export class Viewer {
 							mat.userData.rnmEnableBasis2,
 							mat.userData.rnmEnableBasis3,
 							mat.userData.rnmSpecularIntensity,
-							envMap
+							envMap,
 						);
 						node.material = newMaterial;
 						mat.dispose();
@@ -685,7 +709,12 @@ export class Viewer {
 		// Update basis toggles for all meshes with RNM materials
 		this.content.traverse((node) => {
 			if (node.isMesh && node.material && node.material.userData.rnmOriginalMaterial) {
-				updateRNMBasisToggles(node, this.state.rnmBasis1, this.state.rnmBasis2, this.state.rnmBasis3);
+				updateRNMBasisToggles(
+					node,
+					this.state.rnmBasis1,
+					this.state.rnmBasis2,
+					this.state.rnmBasis3,
+				);
 			}
 		});
 	}
@@ -765,8 +794,8 @@ export class Viewer {
 			lightFolder.add(this.state, 'toneMapping', {
 				Linear: LinearToneMapping,
 				'ACES Filmic': ACESFilmicToneMapping,
-				'Neutral': NeutralToneMapping,
-				'Agx': AgXToneMapping,
+				Neutral: NeutralToneMapping,
+				Agx: AgXToneMapping,
 			}),
 			lightFolder.add(this.state, 'exposure', -10, 10, 0.01),
 			lightFolder.add(this.state, 'punctualLights').listen(),
@@ -777,7 +806,13 @@ export class Viewer {
 		].forEach((ctrl) => ctrl.onChange(() => this.updateLights()));
 
 		// RNM (Radiosity Normal Mapping) controls
-		const directionalIntensityCtrl = lightFolder.add(this.state, 'directionalIntensity', 0, 1, 0.01);
+		const directionalIntensityCtrl = lightFolder.add(
+			this.state,
+			'directionalIntensity',
+			0,
+			1,
+			0.01,
+		);
 		directionalIntensityCtrl.name('RNM Intensity');
 		directionalIntensityCtrl.onChange(() => this.updateDirectionalIntensity());
 
